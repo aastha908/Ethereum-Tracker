@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.sqlite3
+*.db
+.pytest_cache/
+.venv/
+venv/
+env/
+ENV/
+.Python
+
+# VS Code
+.vscode/
+
+# Runtime and local files
+databases/
+*.log
+*.zip
+*.csv
+reorg_log.txt
+
+# OS
+.DS_Store

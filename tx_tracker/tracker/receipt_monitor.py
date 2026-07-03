@@ -1,16 +1,10 @@
 import asyncio
 
-from tracker.rpc import rpc
-
-from database.db import (
-    get_pending_transactions,
-    mark_transaction_result,
-    save_receipt,
-    mark_transaction_mined
-)
-
 
 class ReceiptMonitor:
+    def __init__(self, rpc_client, database):
+        self.rpc_client = rpc_client
+        self.database = database
 
     async def start(self):
 
@@ -35,9 +29,7 @@ class ReceiptMonitor:
 
     async def check_pending(self):
 
-        pending_txs = (
-            get_pending_transactions()
-        )
+        pending_txs = self.database.get_pending_transactions()
 
         if not pending_txs:
             return
@@ -59,7 +51,7 @@ class ReceiptMonitor:
 
         try:
 
-            receipt = rpc(
+            receipt = self.rpc_client.rpc(
                 "eth_getTransactionReceipt",
                 [tx_hash]
             )
@@ -67,51 +59,31 @@ class ReceiptMonitor:
             if receipt is None:
                 return
 
-            block_number = int(
-                receipt["blockNumber"],
-                16
-            )
+            block_number = int(receipt["blockNumber"], 16)
+            tx_index = int(receipt["transactionIndex"], 16)
+            gas_used = int(receipt["gasUsed"], 16)
+            status = int(receipt["status"], 16)
 
-            tx_index = int(
-                receipt["transactionIndex"],
-                16
-            )
-
-            gas_used = int(
-                receipt["gasUsed"],
-                16
-            )
-
-            status = int(
-                receipt["status"],
-                16
-            )
-
-            save_receipt(
+            self.database.save_receipt(
                 tx_hash=tx_hash,
                 block_number=block_number,
                 block_hash=receipt["blockHash"],
                 transaction_index=tx_index,
                 gas_used=gas_used,
-                effective_gas_price=receipt.get(
-                    "effectiveGasPrice",
-                    "0x0"
-                ),
+                effective_gas_price=receipt.get("effectiveGasPrice", "0x0"),
                 status=status,
-                contract_address=receipt.get(
-                    "contractAddress"
-                )
+                contract_address=receipt.get("contractAddress"),
             )
 
-            mark_transaction_mined(
+            self.database.mark_transaction_mined(
                 tx_hash,
                 block_number,
-                receipt["blockHash"]
+                receipt["blockHash"],
             )
 
-            mark_transaction_result(
+            self.database.mark_transaction_result(
                 tx_hash,
-                status
+                status,
             )
 
             print(

@@ -1,20 +1,14 @@
 import asyncio
 import json
 import websockets
-
-from config import ALCHEMY_WS_URL
 from websockets.exceptions import WebSocketException
-
-from tracker.rpc import rpc
-
-from database.db import (
-    create_transaction,
-    add_event,
-    transaction_exists
-)
 
 
 class PendingTransactionListener:
+    def __init__(self, ws_url: str, rpc_client, database):
+        self.ws_url = ws_url
+        self.rpc_client = rpc_client
+        self.database = database
 
     async def subscribe(self):
         reconnect_delay = 5
@@ -54,13 +48,13 @@ class PendingTransactionListener:
     async def _listen(self):
 
         async with websockets.connect(
-            ALCHEMY_WS_URL,
+            self.ws_url,
             open_timeout=45,
             ping_interval=20,
             ping_timeout=20
         ) as websocket:
 
-            print("[+] Connected to Alchemy")
+            print(f"[+] Connected to {self.ws_url}")
 
             subscription = {
                 "jsonrpc": "2.0",
@@ -112,12 +106,10 @@ class PendingTransactionListener:
 
         try:
 
-            if transaction_exists(
-                tx_hash
-            ):
+            if self.database.transaction_exists(tx_hash):
                 return
 
-            tx = rpc(
+            tx = self.rpc_client.rpc(
                 "eth_getTransactionByHash",
                 [tx_hash]
             )
@@ -125,35 +117,18 @@ class PendingTransactionListener:
             if not tx:
                 return
 
-            create_transaction(
-
+            self.database.create_transaction(
                 tx_hash=tx["hash"],
-
                 from_address=tx["from"],
-
                 to_address=tx.get("to"),
-
-                nonce=int(
-                    tx["nonce"],
-                    16
-                ),
-
+                nonce=int(tx["nonce"], 16),
                 value_wei=tx["value"],
-
-                gas_limit=int(
-                    tx["gas"],
-                    16
-                ),
-
-                gas_price_wei=tx.get(
-                    "gasPrice",
-                    "0x0"
-                ),
-
+                gas_limit=int(tx["gas"], 16),
+                gas_price_wei=tx.get("gasPrice", "0x0"),
                 input_data=tx["input"]
             )
 
-            add_event(
+            self.database.add_event(
                 tx["hash"],
                 "PENDING_SEEN",
                 "First observed in mempool"

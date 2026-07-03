@@ -1,23 +1,10 @@
 import asyncio
 
-from tracker.rpc import (
-    rpc,
-    get_safe_block,
-    get_finalized_block
-)
-
-from database.db import (
-    get_active_transactions,
-    save_confirmation,
-    get_latest_confirmation,
-    add_event,
-    has_event,
-    mark_finalized,
-    mark_safe
-)
-
 
 class ConfirmationMonitor:
+    def __init__(self, rpc_client, database):
+        self.rpc_client = rpc_client
+        self.database = database
 
     async def start(self):
 
@@ -43,15 +30,15 @@ class ConfirmationMonitor:
     async def process(self):
 
         latest_block = int(
-            rpc(
+            self.rpc_client.rpc(
                 "eth_blockNumber",
                 []
             ),
             16
         )
 
-        safe_block = get_safe_block()
-        finalized_block = get_finalized_block()
+        safe_block = self.rpc_client.get_safe_block()
+        finalized_block = self.rpc_client.get_finalized_block()
 
         safe_number = (
             int(safe_block["number"], 16)
@@ -65,7 +52,7 @@ class ConfirmationMonitor:
             else 0
         )
 
-        txs = get_active_transactions()
+        txs = self.database.get_active_transactions()
 
         for tx in txs:
 
@@ -83,33 +70,31 @@ class ConfirmationMonitor:
             if (
                 tx["current_block_number"]
                 <= safe_number
-                and not has_event(
+                and not self.database.has_event(
                     tx["tx_hash"],
                     "SAFE"
                 )
             ):
-                mark_safe(tx["tx_hash"])
+                self.database.mark_safe(tx["tx_hash"])
 
             if (
                 tx["current_block_number"]
                 <= finalized_number
-                and not has_event(
+                and not self.database.has_event(
                     tx["tx_hash"],
                     "FINALIZED"
                 )
             ):
-                mark_finalized(tx["tx_hash"])
+                self.database.mark_finalized(tx["tx_hash"])
 
-            previous = (
-                get_latest_confirmation(
-                    tx["tx_hash"]
-                )
+            previous = self.database.get_latest_confirmation(
+                tx["tx_hash"]
             )
 
             if confirmations <= previous:
                 continue
 
-            save_confirmation(
+            self.database.save_confirmation(
                 tx["tx_hash"],
                 tx["current_block_number"],
                 confirmations
@@ -145,8 +130,7 @@ class ConfirmationMonitor:
         ]
 
         if confirmations in milestones:
-
-            add_event(
+            self.database.add_event(
                 tx_hash,
                 "CONFIRMED",
                 f"{confirmations} confirmations"

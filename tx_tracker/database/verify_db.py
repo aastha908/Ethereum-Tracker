@@ -1,40 +1,29 @@
-'''import sqlite3
-
-conn = sqlite3.connect("database/tx_tracker.db")
-
-cursor = conn.cursor()
-
-cursor.execute("""
-SELECT name
-FROM sqlite_master
-WHERE type='table'
-ORDER BY name;
-""")
-
-tables = cursor.fetchall()
-
-print("\nTables Found:\n")
-
-for table in tables:
-    print(table[0])
-
-conn.close()'''
-
+import argparse
 import sqlite3
 
-conn = sqlite3.connect(
-    "database/tx_tracker.db"
+parser = argparse.ArgumentParser(description="Verify SQLite database contents")
+parser.add_argument(
+    "--db-path",
+    default="databases/mainnet.db",
+    help="Path to the SQLite database file",
 )
+args = parser.parse_args()
+
+print(f"Inspecting database: {args.db_path}")
+
+conn = sqlite3.connect(args.db_path)
 
 cursor = conn.cursor()
 
 cursor.execute("""
 SELECT
-tx_hash,
-current_status,
-current_block_number
+    tx_hash,
+    current_status,
+    current_block_number
 FROM transactions
 """)
 
 for row in cursor.fetchall():
     print(row)
+
+conn.close()

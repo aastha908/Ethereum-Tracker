@@ -3,74 +3,70 @@ from pathlib import Path
 from contextlib import contextmanager
 from datetime import datetime, UTC
 
-DB_PATH = "database/tx_tracker.db"
-SCHEMA_PATH = "database/schema.sql"
 
+class Database:
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        self.schema_path = Path(__file__).resolve().parent / "schema.sql"
 
-def initialize_database():
-    conn = sqlite3.connect(DB_PATH)
+    def initialize_database(self):
+        db_path = Path(self.db_path)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
-        schema = f.read()
+        conn = sqlite3.connect(str(db_path))
 
-    conn.executescript(schema)
+        with open(self.schema_path, "r", encoding="utf-8") as f:
+            schema = f.read()
 
-    conn.commit()
-    conn.close()
+        conn.executescript(schema)
 
-    print("Database initialized successfully.")
-
-
-# =====================================================
-# CONNECTION HANDLER
-# =====================================================
-
-@contextmanager
-def get_connection():
-    conn = sqlite3.connect(
-    DB_PATH,
-    check_same_thread=False
-)
-    conn.row_factory = sqlite3.Row
-
-    try:
-        yield conn
         conn.commit()
-
-    except Exception:
-        conn.rollback()
-        raise
-
-    finally:
         conn.close()
 
+        print("Database initialized successfully.")
 
-# =====================================================
-# TRANSACTIONS
-# =====================================================
+    @contextmanager
+    def get_connection(self):
+        conn = sqlite3.connect(
+            self.db_path,
+            check_same_thread=False,
+        )
+        conn.row_factory = sqlite3.Row
 
-def create_transaction(
-    tx_hash,
-    from_address,
-    to_address,
-    nonce,
-    value_wei,
-    gas_limit,
-    gas_price_wei,
-    input_data,
-    first_seen=None,
-    status="PENDING"
-):
-    """
-    Create a new transaction record.
-    """
+        try:
+            yield conn
+            conn.commit()
 
-    if first_seen is None:
-        first_seen = datetime.now(UTC).isoformat()
+        except Exception:
+            conn.rollback()
+            raise
 
-    with get_connection() as conn:
+        finally:
+            conn.close()
 
-        conn.execute("""
+    def create_transaction(
+        self,
+        tx_hash,
+        from_address,
+        to_address,
+        nonce,
+        value_wei,
+        gas_limit,
+        gas_price_wei,
+        input_data,
+        first_seen=None,
+        status="PENDING",
+    ):
+        """
+        Create a new transaction record.
+        """
+
+        if first_seen is None:
+            first_seen = datetime.now(UTC).isoformat()
+
+        with self.get_connection() as conn:
+            conn.execute(
+                """
         INSERT OR IGNORE INTO transactions (
 
             tx_hash,
@@ -86,40 +82,36 @@ def create_transaction(
 
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
+        """,
+                (
+                    tx_hash,
+                    from_address,
+                    to_address,
+                    nonce,
+                    value_wei,
+                    gas_limit,
+                    gas_price_wei,
+                    input_data,
+                    first_seen,
+                    status,
+                ),
+            )
 
-            tx_hash,
-            from_address,
-            to_address,
-            nonce,
-            value_wei,
-            gas_limit,
-            gas_price_wei,
-            input_data,
-            first_seen,
-            status
+    def add_event(
+        self,
+        tx_hash,
+        event_type,
+        details="",
+    ):
+        """
+        Add lifecycle event.
+        """
 
-        ))
+        event_time = datetime.now(UTC).isoformat()
 
-
-# =====================================================
-# EVENTS
-# =====================================================
-
-def add_event(
-    tx_hash,
-    event_type,
-    details=""
-):
-    """
-    Add lifecycle event.
-    """
-
-    event_time = datetime.now(UTC).isoformat()
-
-    with get_connection() as conn:
-
-        conn.execute("""
+        with self.get_connection() as conn:
+            conn.execute(
+                """
         INSERT INTO transaction_events (
 
             tx_hash,
@@ -129,36 +121,32 @@ def add_event(
 
         )
         VALUES (?, ?, ?, ?)
-        """, (
+        """,
+                (
+                    tx_hash,
+                    event_time,
+                    event_type,
+                    details,
+                ),
+            )
 
-            tx_hash,
-            event_time,
-            event_type,
-            details
+    def save_block(
+        self,
+        block_number,
+        block_hash,
+        parent_hash,
+        timestamp,
+        is_canonical=1,
+    ):
+        """
+        Store observed block.
+        """
 
-        ))
+        observed_time = datetime.now(UTC).isoformat()
 
-
-# =====================================================
-# BLOCKS
-# =====================================================
-
-def save_block(
-    block_number,
-    block_hash,
-    parent_hash,
-    timestamp,
-    is_canonical=1
-):
-    """
-    Store observed block.
-    """
-
-    observed_time = datetime.now(UTC).isoformat()
-
-    with get_connection() as conn:
-
-        conn.execute("""
+        with self.get_connection() as conn:
+            conn.execute(
+                """
         INSERT OR REPLACE INTO blocks (
 
             block_hash,
@@ -170,39 +158,35 @@ def save_block(
 
         )
         VALUES (?, ?, ?, ?, ?, ?)
-        """, (
+        """,
+                (
+                    block_hash,
+                    block_number,
+                    parent_hash,
+                    timestamp,
+                    observed_time,
+                    is_canonical,
+                ),
+            )
 
-            block_hash,
-            block_number,
-            parent_hash,
-            timestamp,
-            observed_time,
-            is_canonical
+    def save_receipt(
+        self,
+        tx_hash,
+        block_number,
+        block_hash,
+        transaction_index,
+        gas_used,
+        effective_gas_price,
+        status,
+        contract_address=None,
+    ):
+        """
+        Store transaction receipt.
+        """
 
-        ))
-
-
-# =====================================================
-# RECEIPTS
-# =====================================================
-
-def save_receipt(
-    tx_hash,
-    block_number,
-    block_hash,
-    transaction_index,
-    gas_used,
-    effective_gas_price,
-    status,
-    contract_address=None
-):
-    """
-    Store transaction receipt.
-    """
-
-    with get_connection() as conn:
-
-        conn.execute("""
+        with self.get_connection() as conn:
+            conn.execute(
+                """
         INSERT OR REPLACE INTO transaction_receipts (
 
             tx_hash,
@@ -216,56 +200,53 @@ def save_receipt(
 
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
+        """,
+                (
+                    tx_hash,
+                    block_number,
+                    block_hash,
+                    transaction_index,
+                    gas_used,
+                    effective_gas_price,
+                    status,
+                    contract_address,
+                ),
+            )
 
-            tx_hash,
-            block_number,
-            block_hash,
-            transaction_index,
-            gas_used,
-            effective_gas_price,
-            status,
-            contract_address
+    def update_status(
+        self,
+        tx_hash,
+        new_status,
+        block_number=None,
+        block_hash=None,
+    ):
+        """
+        Update transaction current state.
+        Also records state history.
+        """
 
-        ))
+        timestamp = datetime.now(UTC).isoformat()
 
-
-# =====================================================
-# STATUS UPDATES
-# =====================================================
-
-def update_status(
-    tx_hash,
-    new_status,
-    block_number=None,
-    block_hash=None
-):
-    """
-    Update transaction current state.
-    Also records state history.
-    """
-
-    timestamp = datetime.now(UTC).isoformat()
-
-    with get_connection() as conn:
-
-        conn.execute("""
+        with self.get_connection() as conn:
+            conn.execute(
+                """
         UPDATE transactions
         SET
             current_status=?,
             current_block_number=COALESCE(?, current_block_number),
             current_block_hash=COALESCE(?, current_block_hash)
         WHERE tx_hash=?
-        """, (
+        """,
+                (
+                    new_status,
+                    block_number,
+                    block_hash,
+                    tx_hash,
+                ),
+            )
 
-            new_status,
-            block_number,
-            block_hash,
-            tx_hash
-
-        ))
-
-        conn.execute("""
+            conn.execute(
+                """
         INSERT INTO transaction_state_history (
 
             tx_hash,
@@ -276,89 +257,81 @@ def update_status(
 
         )
         VALUES (?, ?, ?, ?, ?)
-        """, (
+        """,
+                (
+                    tx_hash,
+                    new_status,
+                    block_number,
+                    block_hash,
+                    timestamp,
+                ),
+            )
 
-            tx_hash,
-            new_status,
-            block_number,
-            block_hash,
-            timestamp
-
-        ))
-
-
-# =====================================================
-# LOOKUPS
-# =====================================================
-
-def get_transaction(tx_hash):
-
-    with get_connection() as conn:
-
-        result = conn.execute("""
+    def get_transaction(self, tx_hash):
+        with self.get_connection() as conn:
+            result = conn.execute(
+                """
         SELECT *
         FROM transactions
         WHERE tx_hash=?
-        """, (tx_hash,))
+        """,
+                (tx_hash,),
+            )
 
-        row = result.fetchone()
+            row = result.fetchone()
+            return dict(row) if row else None
 
-        return dict(row) if row else None
-
-
-def get_transaction_events(tx_hash):
-
-    with get_connection() as conn:
-
-        result = conn.execute("""
+    def get_transaction_events(self, tx_hash):
+        with self.get_connection() as conn:
+            result = conn.execute(
+                """
         SELECT *
         FROM transaction_events
         WHERE tx_hash=?
         ORDER BY event_time
-        """, (tx_hash,))
+        """,
+                (tx_hash,),
+            )
 
-        return [dict(row) for row in result.fetchall()]
+            return [dict(row) for row in result.fetchall()]
 
-
-def has_event(
-    tx_hash,
-    event_type
-):
-
-    with get_connection() as conn:
-
-        result = conn.execute("""
+    def has_event(
+        self,
+        tx_hash,
+        event_type,
+    ):
+        with self.get_connection() as conn:
+            result = conn.execute(
+                """
         SELECT 1
         FROM transaction_events
         WHERE tx_hash=?
         AND event_type=?
         LIMIT 1
-        """, (
-            tx_hash,
-            event_type
-        ))
+        """,
+                (
+                    tx_hash,
+                    event_type,
+                ),
+            )
 
-        return result.fetchone() is not None
-    
+            return result.fetchone() is not None
 
-# =====================================================
-# CONFIRMATIONS
-# =====================================================
+    def save_confirmation(
+        self,
+        tx_hash,
+        block_number,
+        confirmation_count,
+    ):
+        """
+        Store confirmation progress.
+        """
 
-def save_confirmation(
-    tx_hash,
-    block_number,
-    confirmation_count
-):
-    """
-    Store confirmation progress.
-    """
+        timestamp = datetime.now(UTC).isoformat()
 
-    timestamp = datetime.now(UTC).isoformat()
-
-    with get_connection() as conn:
-
-        conn.execute("""
+        with self.get_connection() as conn:
+            conn.execute(
+                """
         INSERT INTO transaction_confirmations (
 
             tx_hash,
@@ -368,36 +341,33 @@ def save_confirmation(
 
         )
         VALUES (?, ?, ?, ?)
-        """, (
+        """,
+                (
+                    tx_hash,
+                    block_number,
+                    confirmation_count,
+                    timestamp,
+                ),
+            )
 
-            tx_hash,
-            block_number,
-            confirmation_count,
-            timestamp
+    def save_trace(
+        self,
+        tx_hash,
+        trace_address,
+        call_type,
+        from_address,
+        to_address,
+        value_wei,
+        gas,
+        trace_index,
+    ):
+        """
+        Store internal trace call.
+        """
 
-        ))
-
-# =====================================================
-# TRACES
-# =====================================================
-
-def save_trace(
-    tx_hash,
-    trace_address,
-    call_type,
-    from_address,
-    to_address,
-    value_wei,
-    gas,
-    trace_index
-):
-    """
-    Store internal trace call.
-    """
-
-    with get_connection() as conn:
-
-        conn.execute("""
+        with self.get_connection() as conn:
+            conn.execute(
+                """
         INSERT INTO traces (
 
             tx_hash,
@@ -411,37 +381,34 @@ def save_trace(
 
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
+        """,
+                (
+                    tx_hash,
+                    trace_address,
+                    call_type,
+                    from_address,
+                    to_address,
+                    value_wei,
+                    gas,
+                    trace_index,
+                ),
+            )
 
-            tx_hash,
-            trace_address,
-            call_type,
-            from_address,
-            to_address,
-            value_wei,
-            gas,
-            trace_index
+    def save_reorg(
+        self,
+        block_number,
+        old_block_hash,
+        new_block_hash,
+    ):
+        """
+        Store reorg event.
+        """
 
-        ))
+        timestamp = datetime.now(UTC).isoformat()
 
-# =====================================================
-# REORGS
-# =====================================================
-
-def save_reorg(
-    block_number,
-    old_block_hash,
-    new_block_hash
-):
-    """
-    Store reorg event.
-    """
-
-    timestamp = datetime.now(UTC).isoformat()
-
-    with get_connection() as conn:
-
-        conn.execute("""
+        with self.get_connection() as conn:
+            conn.execute(
+                """
         INSERT INTO reorgs (
 
             detected_time,
@@ -451,34 +418,31 @@ def save_reorg(
 
         )
         VALUES (?, ?, ?, ?)
-        """, (
+        """,
+                (
+                    timestamp,
+                    block_number,
+                    old_block_hash,
+                    new_block_hash,
+                ),
+            )
 
-            timestamp,
-            block_number,
-            old_block_hash,
-            new_block_hash
+    def save_replacement(
+        self,
+        original_tx,
+        replacement_tx,
+        sender,
+        nonce,
+    ):
+        """
+        Store replacement transaction.
+        """
 
-        ))
+        timestamp = datetime.now(UTC).isoformat()
 
-# =====================================================
-# REPLACEMENTS
-# =====================================================
-
-def save_replacement(
-    original_tx,
-    replacement_tx,
-    sender,
-    nonce
-):
-    """
-    Store replacement transaction.
-    """
-
-    timestamp = datetime.now(UTC).isoformat()
-
-    with get_connection() as conn:
-
-        conn.execute("""
+        with self.get_connection() as conn:
+            conn.execute(
+                """
         INSERT INTO replacements (
 
             original_tx,
@@ -489,110 +453,87 @@ def save_replacement(
 
         )
         VALUES (?, ?, ?, ?, ?)
-        """, (
+        """,
+                (
+                    original_tx,
+                    replacement_tx,
+                    sender,
+                    nonce,
+                    timestamp,
+                ),
+            )
 
-            original_tx,
-            replacement_tx,
-            sender,
-            nonce,
-            timestamp
-
-        ))
-
-def get_pending_transactions():
-
-    with get_connection() as conn:
-
-        result = conn.execute("""
+    def get_pending_transactions(self):
+        with self.get_connection() as conn:
+            result = conn.execute(
+                """
         SELECT *
         FROM transactions
         WHERE current_status='PENDING'
-        """)
+        """,
+            )
 
-        return [dict(row) for row in result.fetchall()]
-    
-def get_latest_block():
+            return [dict(row) for row in result.fetchall()]
 
-    with get_connection() as conn:
-
-        result = conn.execute("""
+    def get_latest_block(self):
+        with self.get_connection() as conn:
+            result = conn.execute(
+                """
         SELECT *
         FROM blocks
         ORDER BY block_number DESC
         LIMIT 1
-        """)
+        """,
+            )
 
-        row = result.fetchone()
+            row = result.fetchone()
+            return dict(row) if row else None
 
-        return dict(row) if row else None
-
-def transaction_exists(tx_hash):
-
-    with get_connection() as conn:
-
-        result = conn.execute("""
+    def transaction_exists(self, tx_hash):
+        with self.get_connection() as conn:
+            result = conn.execute(
+                """
         SELECT 1
         FROM transactions
         WHERE tx_hash=?
         LIMIT 1
-        """, (tx_hash,))
+        """,
+                (tx_hash,),
+            )
 
-        return result.fetchone() is not None
-    
-def mark_transaction_mined(
-    tx_hash,
-    block_number,
-    block_hash
-):
-    update_status(
+            return result.fetchone() is not None
+
+    def mark_transaction_mined(
+        self,
         tx_hash,
-        "MINED",
         block_number,
-        block_hash
-    )
-
-    add_event(
-        tx_hash,
-        "MINED",
-        f"Included in block {block_number}"
-    )
-
-def mark_transaction_result(
-    tx_hash,
-    status
-):
-
-    if status == 1:
-
-        update_status(
+        block_hash,
+    ):
+        self.update_status(
             tx_hash,
-            "SUCCESS"
+            "MINED",
+            block_number,
+            block_hash,
         )
 
-        add_event(
+        self.add_event(
             tx_hash,
-            "SUCCESS",
-            "Transaction executed successfully"
+            "MINED",
+            f"Included in block {block_number}",
         )
 
-    else:
+    def mark_transaction_result(self, tx_hash, status):
+        if status == 1:
+            self.update_status(tx_hash, "SUCCESS")
+            self.add_event(tx_hash, "SUCCESS", "Transaction executed successfully")
+        else:
+            self.update_status(tx_hash, "FAILED")
+            self.add_event(tx_hash, "FAILED", "Transaction execution reverted")
 
-        update_status(
-            tx_hash,
-            "FAILED"
-        )
-
-        add_event(
-            tx_hash,
-            "FAILED",
-            "Transaction execution reverted"
-        )
-
-def get_active_transactions():
-
-    with get_connection() as conn:
-
-        result = conn.execute("""
+    def get_active_transactions(self):
+        with self.get_connection() as conn:
+            result = conn.execute(
+                """
         SELECT *
         FROM transactions
         WHERE current_status IN (
@@ -600,78 +541,30 @@ def get_active_transactions():
             'SUCCESS',
             'FAILED'
         )
-        """)
+        """,
+            )
 
-        return [
-            dict(row)
-            for row in result.fetchall()
-        ]
+            return [dict(row) for row in result.fetchall()]
 
-def get_latest_confirmation(
-    tx_hash
-):
-
-    with get_connection() as conn:
-
-        result = conn.execute("""
+    def get_latest_confirmation(self, tx_hash):
+        with self.get_connection() as conn:
+            result = conn.execute(
+                """
         SELECT confirmation_count
         FROM transaction_confirmations
         WHERE tx_hash=?
         ORDER BY confirmation_count DESC
         LIMIT 1
-        """, (tx_hash,))
+        """,
+                (tx_hash,),
+            )
 
-        row = result.fetchone()
+            row = result.fetchone()
+            return row["confirmation_count"] if row else -1
 
-        return (
-            row["confirmation_count"]
-            if row
-            else -1
-        )
+    def mark_finalized(self, tx_hash):
+        self.update_status(tx_hash, "FINALIZED")
+        self.add_event(tx_hash, "FINALIZED", "Transaction finalized")
 
-def mark_finalized(
-    tx_hash
-):
-
-    update_status(
-        tx_hash,
-        "FINALIZED"
-    )
-
-    add_event(
-        tx_hash,
-        "FINALIZED",
-        "Transaction finalized"
-    )
-
-
-def mark_safe(
-    tx_hash
-):
-
-    add_event(
-        tx_hash,
-        "SAFE",
-        "Transaction reached safe block"
-    )
-
-'''
-save_confirmation(
-    tx_hash="0xabc",
-    block_number=23000000,
-    confirmation_count=12
-)
-
-save_reorg(
-    100,
-    "AAA",
-    "BBB"
-)
-
-save_replacement(
-    original_tx="TX_A",
-    replacement_tx="TX_B",
-    sender="0x123",
-    nonce=50
-)
-'''
+    def mark_safe(self, tx_hash):
+        self.add_event(tx_hash, "SAFE", "Transaction reached safe block")
