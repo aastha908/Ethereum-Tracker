@@ -64,7 +64,14 @@ CREATE TABLE IF NOT EXISTS blocks (
 
     observed_time TIMESTAMP,
 
-    is_canonical INTEGER DEFAULT 1
+    is_canonical INTEGER DEFAULT 1,
+
+    gas_used INTEGER,
+    gas_limit INTEGER,
+    base_fee_per_gas TEXT,
+    transaction_count INTEGER,
+    block_size INTEGER,
+    is_empty INTEGER DEFAULT 0
 );
 
 -- =====================================================
@@ -174,7 +181,10 @@ CREATE TABLE IF NOT EXISTS reorgs (
 
     old_block_hash TEXT,
 
-    new_block_hash TEXT
+    new_block_hash TEXT,
+
+    reorg_group_id TEXT,
+    depth INTEGER
 );
 
 -- =====================================================
@@ -222,6 +232,28 @@ CREATE TABLE IF NOT EXISTS block_transactions (
         block_hash,
         tx_hash
     )
+);
+
+-- =====================================================
+-- CONSENSUS LAYER
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS consensus_slots (
+
+    slot INTEGER PRIMARY KEY,
+    epoch INTEGER,
+    proposer_index INTEGER,
+    block_root TEXT,
+    is_missed INTEGER DEFAULT 0,
+    recorded_at TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS epoch_finality (
+
+    epoch INTEGER PRIMARY KEY,
+    justified INTEGER DEFAULT 0,
+    finalized INTEGER DEFAULT 0,
+    recorded_at TIMESTAMP
 );
 
 -- =====================================================

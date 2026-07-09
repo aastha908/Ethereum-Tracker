@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 from contextlib import contextmanager
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 
 
 class Database:
@@ -20,10 +20,33 @@ class Database:
 
         conn.executescript(schema)
 
+        self._ensure_schema_columns(conn)
+
         conn.commit()
         conn.close()
 
         print("Database initialized successfully.")
+
+    def _ensure_schema_columns(self, conn):
+        block_columns = {row[1] for row in conn.execute("PRAGMA table_info(blocks)")}
+        for column_name, definition in {
+            "gas_used": "gas_used INTEGER",
+            "gas_limit": "gas_limit INTEGER",
+            "base_fee_per_gas": "base_fee_per_gas TEXT",
+            "transaction_count": "transaction_count INTEGER",
+            "block_size": "block_size INTEGER",
+            "is_empty": "is_empty INTEGER DEFAULT 0",
+        }.items():
+            if column_name not in block_columns:
+                conn.execute(f"ALTER TABLE blocks ADD COLUMN {definition}")
+
+        reorg_columns = {row[1] for row in conn.execute("PRAGMA table_info(reorgs)")}
+        for column_name, definition in {
+            "reorg_group_id": "reorg_group_id TEXT",
+            "depth": "depth INTEGER",
+        }.items():
+            if column_name not in reorg_columns:
+                conn.execute(f"ALTER TABLE reorgs ADD COLUMN {definition}")
 
     @contextmanager
     def get_connection(self):
@@ -62,7 +85,7 @@ class Database:
         """
 
         if first_seen is None:
-            first_seen = datetime.now(UTC).isoformat()
+            first_seen = datetime.now(timezone.utc).isoformat()
 
         with self.get_connection() as conn:
             conn.execute(
@@ -107,7 +130,7 @@ class Database:
         Add lifecycle event.
         """
 
-        event_time = datetime.now(UTC).isoformat()
+        event_time = datetime.now(timezone.utc).isoformat()
 
         with self.get_connection() as conn:
             conn.execute(
@@ -137,12 +160,18 @@ class Database:
         parent_hash,
         timestamp,
         is_canonical=1,
+        gas_used=None,
+        gas_limit=None,
+        base_fee_per_gas=None,
+        transaction_count=None,
+        block_size=None,
+        is_empty=0,
     ):
         """
         Store observed block.
         """
 
-        observed_time = datetime.now(UTC).isoformat()
+        observed_time = datetime.now(timezone.utc).isoformat()
 
         with self.get_connection() as conn:
             conn.execute(
@@ -154,10 +183,16 @@ class Database:
             parent_hash,
             timestamp,
             observed_time,
-            is_canonical
+            is_canonical,
+            gas_used,
+            gas_limit,
+            base_fee_per_gas,
+            transaction_count,
+            block_size,
+            is_empty
 
         )
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
                 (
                     block_hash,
@@ -166,6 +201,12 @@ class Database:
                     timestamp,
                     observed_time,
                     is_canonical,
+                    gas_used,
+                    gas_limit,
+                    base_fee_per_gas,
+                    transaction_count,
+                    block_size,
+                    is_empty,
                 ),
             )
 
@@ -225,7 +266,7 @@ class Database:
         Also records state history.
         """
 
-        timestamp = datetime.now(UTC).isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
 
         with self.get_connection() as conn:
             conn.execute(
@@ -327,7 +368,7 @@ class Database:
         Store confirmation progress.
         """
 
-        timestamp = datetime.now(UTC).isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
 
         with self.get_connection() as conn:
             conn.execute(
@@ -399,12 +440,14 @@ class Database:
         block_number,
         old_block_hash,
         new_block_hash,
+        reorg_group_id=None,
+        depth=None,
     ):
         """
         Store reorg event.
         """
 
-        timestamp = datetime.now(UTC).isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
 
         with self.get_connection() as conn:
             conn.execute(
@@ -414,16 +457,20 @@ class Database:
             detected_time,
             block_number,
             old_block_hash,
-            new_block_hash
+            new_block_hash,
+            reorg_group_id,
+            depth
 
         )
-        VALUES (?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
                 (
                     timestamp,
                     block_number,
                     old_block_hash,
                     new_block_hash,
+                    reorg_group_id,
+                    depth,
                 ),
             )
 
@@ -438,7 +485,7 @@ class Database:
         Store replacement transaction.
         """
 
-        timestamp = datetime.now(UTC).isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
 
         with self.get_connection() as conn:
             conn.execute(
@@ -568,3 +615,84 @@ class Database:
 
     def mark_safe(self, tx_hash):
         self.add_event(tx_hash, "SAFE", "Transaction reached safe block")
+
+    def save_consensus_slot(
+        self,
+        slot,
+        epoch,
+        proposer_index,
+        block_root,
+        is_missed=0,
+    ):
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        with self.get_connection() as conn:
+            conn.execute(
+                """
+        INSERT OR REPLACE INTO consensus_slots (
+
+            slot,
+            epoch,
+            proposer_index,
+            block_root,
+            is_missed,
+            recorded_at
+
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+                (
+                    slot,
+                    epoch,
+                    proposer_index,
+                    block_root,
+                    is_missed,
+                    timestamp,
+                ),
+            )
+
+    def get_latest_recorded_slot(self):
+        with self.get_connection() as conn:
+            result = conn.execute(
+                """
+        SELECT MAX(slot) AS max_slot
+        FROM consensus_slots
+        """,
+            )
+            row = result.fetchone()
+            return int(row["max_slot"]) if row and row["max_slot"] is not None else None
+
+    def save_epoch_finality(self, epoch, justified, finalized):
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        with self.get_connection() as conn:
+            conn.execute(
+                """
+        INSERT OR REPLACE INTO epoch_finality (
+
+            epoch,
+            justified,
+            finalized,
+            recorded_at
+
+        )
+        VALUES (?, ?, ?, ?)
+        """,
+                (
+                    epoch,
+                    justified,
+                    finalized,
+                    timestamp,
+                ),
+            )
+
+    def get_latest_recorded_epoch(self):
+        with self.get_connection() as conn:
+            result = conn.execute(
+                """
+        SELECT MAX(epoch) AS max_epoch
+        FROM epoch_finality
+        """,
+            )
+            row = result.fetchone()
+            return int(row["max_epoch"]) if row and row["max_epoch"] is not None else None

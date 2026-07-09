@@ -7,6 +7,9 @@ from tx_tracker.tracker.rpc_client import RPCClient
 from tx_tracker.tracker.pending_listener import PendingTransactionListener
 from tx_tracker.tracker.receipt_monitor import ReceiptMonitor
 from tx_tracker.tracker.confirmation_monitor import ConfirmationMonitor
+from tx_tracker.tracker.block_listener import BlockListener
+from tx_tracker.tracker.consensus_client import BeaconClient
+from tx_tracker.tracker.consensus_monitor import ConsensusMonitor
 
 
 async def main(network_name: str):
@@ -28,12 +31,27 @@ async def main(network_name: str):
     )
     monitor = ReceiptMonitor(rpc_client=rpc_client, database=database)
     confirmation_monitor = ConfirmationMonitor(rpc_client=rpc_client, database=database)
+    block_listener = BlockListener(rpc_client=rpc_client, database=database)
 
-    await asyncio.gather(
+    coroutines = [
         listener.subscribe(),
         monitor.start(),
         confirmation_monitor.start(),
-    )
+        block_listener.start(),
+    ]
+
+    if network_config.beacon_url:
+        beacon_client = BeaconClient(beacon_url=network_config.beacon_url)
+        consensus_monitor = ConsensusMonitor(
+            beacon_client=beacon_client,
+            database=database,
+        )
+        coroutines.append(consensus_monitor.start())
+        print("Consensus monitoring: enabled")
+    else:
+        print("Consensus monitoring: disabled (no beacon_url for this network)")
+
+    await asyncio.gather(*coroutines)
 
 
 if __name__ == "__main__":
