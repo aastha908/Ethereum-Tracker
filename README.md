@@ -53,4 +53,9 @@ python3 tx_tracker/test_db.py --db-path databases/testnet.db
 ## Notes
 
 - Relative database paths in `networks/*.env` are resolved from the repository root.
-- `mainnet` requires network access to Alchemy RPC and WebSocket endpoints.
+- `mainnet` requires network access to Alchemy RPC and WebSocket endpoints
+start tracker: 
+while true; do
+>   PYTHONPATH=. venv/bin/python replay/mirror_injector.py --network testnet --limit 5 --broadcast
+>   sleep 15
+> done

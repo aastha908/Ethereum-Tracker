@@ -21,6 +21,9 @@ databases/
 *.zip
 *.csv
 reorg_log.txt
+reorg_log_*.txt
+replay/testnet_accounts.json
+replay/last_processed.txt
 
 # OS
 .DS_Store
