@@ -1,3 +1,4 @@
+import argparse
 import csv
 import json
 import os
@@ -5,10 +6,20 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 from collections import defaultdict, deque
 
-FINALIZED_CSV_FILE = "finalized_blocks_range.csv"
-LOG_CSV_FILE = "blocks_log.csv"
+parser = argparse.ArgumentParser(description="Blockchain fork viewer")
+parser.add_argument("--network", choices=["mainnet", "testnet"], required=True)
+parser.add_argument("--port", type=int, default=8000)
+args = parser.parse_args()
+
+if args.network == "mainnet":
+  FINALIZED_CSV_FILE = "finalized_blocks_range.csv"
+  LOG_CSV_FILE = "blocks_log.csv"
+else:
+  FINALIZED_CSV_FILE = "blocks_log_testnet.csv"
+  LOG_CSV_FILE = "blocks_log_testnet.csv"
+
 HOST = "127.0.0.1"
-PORT = 8000
+PORT = args.port
 
 HTML_PAGE = """<!DOCTYPE html>
 <html lang="en">

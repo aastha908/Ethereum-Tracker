@@ -1,3 +1,4 @@
+import argparse
 from web3 import Web3
 import asyncio
 import time
@@ -5,7 +6,15 @@ import csv
 import os
 from collections import deque
 
-WSS_URL = "wss://eth-mainnet.g.alchemy.com/v2/qaaOJVFEBs_yHzbX7FVv-"
+from tx_tracker.config.networks import load_network_config
+
+
+parser = argparse.ArgumentParser(description="Enhanced real-time fork detection")
+parser.add_argument("--network", choices=["mainnet", "testnet"], required=True)
+args = parser.parse_args()
+
+network_config = load_network_config(args.network)
+WSS_URL = network_config.ws_url
 
 w3 = Web3(Web3.LegacyWebSocketProvider(WSS_URL))
 
@@ -13,7 +22,7 @@ if not w3.is_connected():
     print("[!] Connection failed")
     exit()
 
-print("[+] Connected to Ethereum (WSS)")
+print(f"[+] Connected to {args.network} (WSS)")
 print("[+] Listening for blocks...\n")
 
 # ==============================
@@ -25,9 +34,9 @@ FETCH_RETRIES = 3
 RETRY_DELAY = 0.5
 PROCESSING_DELAY = 0.2   # reduced for accuracy
 
-LOG_FILE = "reorg_log.txt"
-CSV_FILE = "blocks_log_final.csv"
-TX_CSV_FILE = "transactions_log.csv"
+LOG_FILE = f"reorg_log_{args.network}.txt"
+CSV_FILE = f"blocks_log_{args.network}.csv"
+TX_CSV_FILE = f"transactions_log_{args.network}.csv"
 
 # ==============================
 # DATA STRUCTURES
