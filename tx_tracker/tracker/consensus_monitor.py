@@ -1,5 +1,7 @@
 import asyncio
 
+MAX_BACKFILL_GAP = 10
+
 
 class ConsensusMonitor:
     def __init__(self, beacon_client, database):
@@ -42,6 +44,15 @@ class ConsensusMonitor:
             await asyncio.sleep(12)
 
     def _backfill_missed_slots(self, last_slot, new_slot):
+        gap = new_slot - last_slot - 1
+        if gap > MAX_BACKFILL_GAP:
+            print(
+                f"[CONSENSUS] Gap of {gap} slots between {last_slot} and "
+                f"{new_slot} exceeds backfill threshold - likely a tracker restart, "
+                "not treating as missed slots"
+            )
+            return
+
         for slot in range(last_slot + 1, new_slot):
             self.database.save_consensus_slot(
                 slot=slot,

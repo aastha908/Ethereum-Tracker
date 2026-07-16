@@ -1,7 +1,7 @@
 import asyncio
 import json
 import websockets
-from websockets.exceptions import WebSocketException
+from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK, WebSocketException
 
 
 class PendingTransactionListener:
@@ -92,12 +92,21 @@ class PendingTransactionListener:
                         tx_hash
                     )
 
+                except (ConnectionClosedOK, ConnectionClosedError) as exc:
+
+                    print(
+                        "[WS CLOSED]",
+                        str(exc)
+                    )
+                    break
+
                 except Exception as e:
 
                     print(
                         "[ERROR]",
                         str(e)
                     )
+                    break
 
     async def process_transaction(
         self,

@@ -45,7 +45,7 @@ Current expected fields:
 For mainnet, export your Alchemy key before starting:
 
 ```bash
-export ALCHEMY_API_KEY="your_alchemy_key_here"
+export ALCHEMY_API_KEY=your_alchemy_api_key_here
 ```
 
 ## 4. Prepare Replay Accounts (Testnet Injector)
@@ -81,6 +81,13 @@ Expected startup logs include:
 - `Confirmation monitor started`
 - `Block listener started`
 - `Connected to ws://...`
+
+Block listener behavior (current):
+
+- polls mainnet/testnet head every second
+- backfills missing block numbers if more than one block arrived between polls
+- stores on-chain block timestamp in `blocks.timestamp` (unix seconds)
+- stores local ingest time in `blocks.observed_time` (ISO datetime)
 
 Use `--network mainnet` for mainnet:
 
@@ -149,6 +156,18 @@ while true; do
 done
 ```
 
+Recommended loop for realistic testnet-mainnet similarity (less bursty):
+
+```bash
+source venv/bin/activate
+while true; do
+	PYTHONPATH=. python replay/mirror_injector.py --network testnet --limit 1 --broadcast
+	sleep 30
+done
+```
+
+If testnet load is still too low/high, tune `sleep` in the 20-45s range.
+
 Dry-run mode (no broadcast):
 
 ```bash
@@ -183,6 +202,17 @@ print('epochs:', [dict(r) for r in conn.execute('SELECT epoch, finalized FROM ep
 "
 ```
 
+Mainnet block timestamp check (on-chain timestamp + observed ingestion time):
+
+```bash
+venv/bin/python -c "
+import sqlite3
+conn = sqlite3.connect('databases/mainnet.db')
+rows = conn.execute('SELECT block_number, timestamp, typeof(timestamp), observed_time FROM blocks ORDER BY block_number DESC LIMIT 8').fetchall()
+for r in rows: print(r)
+"
+```
+
 ## 10. Run Everything Together (Quick Start)
 
 From four terminals (all from repo root):
@@ -213,12 +243,50 @@ Terminal 4:
 ```bash
 source venv/bin/activate
 while true; do
-	PYTHONPATH=. python replay/mirror_injector.py --network testnet --limit 5 --broadcast
-	sleep 15
+	PYTHONPATH=. python replay/mirror_injector.py --network testnet --limit 1 --broadcast
+	sleep 30
 done
 ```
 
-## 11. Common Issues and Fixes
+## 11. Comparison Dashboard (Live And Frozen)
+
+Start server:
+
+```bash
+PYTHONPATH=. python comparison/dashboard_server.py --port 8002 --window-minutes 180
+```
+
+Open browser:
+
+- `http://127.0.0.1:8002`
+
+Generate and save a frozen report for a fixed window:
+
+```bash
+PYTHONPATH=. python - <<'PY'
+from datetime import datetime, timezone, timedelta
+from comparison.report import generate_report, save_report
+
+end_time = datetime.now(timezone.utc)
+start_time = end_time - timedelta(minutes=30)
+
+report = generate_report(
+    'databases/mainnet.db',
+    'databases/testnet.db',
+    start_time.isoformat(),
+    end_time.isoformat(),
+)
+print(save_report(report))
+PY
+```
+
+In dashboard UI:
+
+- click `Frozen Report`
+- select saved report filename
+- verify mode badge shows frozen report filename
+
+## 12. Common Issues and Fixes
 
 `ModuleNotFoundError: No module named tx_tracker`
 
@@ -235,11 +303,22 @@ Mainnet does not start
 - confirm `ALCHEMY_API_KEY` is exported
 - confirm DNS/network access to Alchemy endpoints
 
+Repeated websocket message:
+
+- `[ERROR] received 1000 (OK) Normal Closure; then sent 1000 (OK) Normal Closure`
+- meaning: provider closed websocket normally
+- current tracker behavior: logs closure and reconnects automatically
+
 `Consensus monitoring: disabled`
 
 - set `BEACON_URL` in your `networks/<network>.env`
 
-## 12. Generated Files
+Block interval looks inconsistent in comparison dashboard:
+
+- block interval stats are gated by minimum sample count
+- if `n < min_required_samples`, dashboard shows insufficient data instead of misleading values
+
+## 13. Generated Files
 
 Typical outputs:
 
@@ -247,8 +326,9 @@ Typical outputs:
 - reorg logs: `reorg_log_mainnet.txt`, `reorg_log_testnet.txt`
 - block logs: `blocks_log_mainnet.csv`, `blocks_log_testnet.csv`
 - tx logs: `transactions_log_mainnet.csv`, `transactions_log_testnet.csv`
+- comparison reports: `comparison/reports/report_*.json`
 
-## 13. Stop Services
+## 14. Stop Services
 
 - Press `Ctrl+C` in each running terminal.
 - For injector loop, `Ctrl+C` stops the loop immediately.

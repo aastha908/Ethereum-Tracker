@@ -1,7 +1,6 @@
 import asyncio
 import time
 from collections import deque
-from datetime import datetime, timezone
 
 
 class BlockListener:
@@ -11,6 +10,7 @@ class BlockListener:
         self.block_history = {}
         self.max_history = 20
         self.history_queue = deque()
+        self.last_processed_block_number = None
 
     async def start(self):
         print("[+] Block listener started")
@@ -21,14 +21,34 @@ class BlockListener:
             except Exception as e:
                 print("[BLOCK ERROR]", e)
 
-            await asyncio.sleep(12)
+            await asyncio.sleep(1)
 
     async def process_latest_block(self):
-        block = self.rpc_client.rpc("eth_getBlockByNumber", ["latest", True])
+        latest_hex = self.rpc_client.rpc("eth_blockNumber", [])
+        latest_number = int(latest_hex, 16)
+
+        if self.last_processed_block_number is None:
+            start_number = latest_number
+        else:
+            start_number = self.last_processed_block_number + 1
+
+        if start_number > latest_number:
+            return
+
+        for block_number in range(start_number, latest_number + 1):
+            block = self.rpc_client.rpc("eth_getBlockByNumber", [hex(block_number), False])
+            if not block:
+                continue
+
+            self._save_block(block)
+            self.last_processed_block_number = block_number
+
+    def _save_block(self, block):
 
         number = int(block["number"], 16)
         hash_ = block["hash"]
         parent = block["parentHash"]
+        chain_timestamp = int(block["timestamp"], 16)
         gas_used = int(block["gasUsed"], 16)
         gas_limit = int(block["gasLimit"], 16)
         base_fee = block.get("baseFeePerGas", "0x0")
@@ -51,12 +71,11 @@ class BlockListener:
             old = self.history_queue.popleft()
             self.block_history.pop(old, None)
 
-        timestamp = datetime.now(timezone.utc).isoformat()
         self.database.save_block(
             block_number=number,
             block_hash=hash_,
             parent_hash=parent,
-            timestamp=timestamp,
+            timestamp=chain_timestamp,
             is_canonical=1,
             gas_used=gas_used,
             gas_limit=gas_limit,
